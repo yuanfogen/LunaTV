@@ -2,9 +2,10 @@
 
 'use client';
 
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Globe, Plus, X } from 'lucide-react';
 import { memo, useDeferredValue, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 interface UserEmbyConfigProps {
   initialConfig: { sources: any[] };
@@ -20,14 +21,21 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [testingIndex, setTestingIndex] = useState<number | null>(null);
 
+  // Fetch public sources from admin
+  const { data: publicSourcesData } = useQuery({
+    queryKey: ['emby', 'public-sources'],
+    queryFn: async () => {
+      const res = await fetch('/api/emby/public-sources');
+      if (!res.ok) return { sources: [] };
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const publicSources: any[] = publicSourcesData?.sources || [];
+
   useEffect(() => {
     setSources(initialConfig.sources || []);
   }, [initialConfig]);
-
-  // Toast
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
   // Checkbox state only (text inputs use refs for performance)
   const [formChecks, setFormChecks] = useState({
@@ -45,13 +53,6 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
   const refApiKey = useRef<HTMLInputElement>(null);
   const refUsername = useRef<HTMLInputElement>(null);
   const refPassword = useRef<HTMLInputElement>(null);
-
-  const showNotification = (message: string, type: 'success' | 'error') => {
-    setToastMessage(message);
-    setToastType(type);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
-  };
 
   const clearRefs = () => {
     if (refKey.current) refKey.current.value = '';
@@ -105,10 +106,10 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: { sources: newSources } }),
       });
-      showNotification('删除成功', 'success');
+      toast.success('删除成功');
       queryClient.invalidateQueries({ queryKey: ['user', 'emby-config'] });
     } catch {
-      showNotification('删除失败', 'error');
+      toast.error('删除失败');
     }
   };
 
@@ -123,12 +124,12 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
       });
       const data = await res.json();
       if (data.success) {
-        showNotification(`连接成功！用户: ${data.user?.Name || '未知'}`, 'success');
+        toast.success(`连接成功！用户: ${data.user?.Name || '未知'}`);
       } else {
-        showNotification(`连接失败: ${data.error}`, 'error');
+        toast.error(`连接失败: ${data.error}`);
       }
     } catch {
-      showNotification('测试连接失败', 'error');
+      toast.error('测试连接失败');
     } finally {
       setTestingIndex(null);
     }
@@ -143,11 +144,11 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
     const Password = refPassword.current?.value || '';
 
     if (!key || !name || !ServerURL) {
-      showNotification('请填写必填字段：标识符、名称、服务器地址', 'error');
+      toast.error('请填写必填字段：标识符、名称、服务器地址');
       return;
     }
     if (editingIndex === null && sources.some(s => s.key === key)) {
-      showNotification('标识符已存在，请使用其他标识符', 'error');
+      toast.error('标识符已存在，请使用其他标识符');
       return;
     }
 
@@ -166,14 +167,14 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
       const data = await res.json();
       if (data.success) {
         setSources(newSources);
-        showNotification('保存成功！', 'success');
+        toast.success('保存成功！');
         queryClient.invalidateQueries({ queryKey: ['user', 'emby-config'] });
         resetForm();
       } else {
-        showNotification(`保存失败: ${data.error}`, 'error');
+        toast.error(`保存失败: ${data.error}`);
       }
     } catch {
-      showNotification('保存失败，请重试', 'error');
+      toast.error('保存失败，请重试');
     } finally {
       setIsLoading(false);
     }
@@ -181,9 +182,39 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
 
   return (
     <div className='space-y-4'>
-      {/* 源列表 */}
+      {/* 公共源（只读） */}
+      {publicSources.length > 0 && !showAddForm && editingIndex === null && (
+        <div className='space-y-2'>
+          <div className='flex items-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-400 uppercase tracking-wide'>
+            <Globe className='w-3.5 h-3.5' />
+            <span>公共源</span>
+            <span className='text-purple-400 dark:text-purple-600 normal-case font-normal'>由管理员提供，自动可用</span>
+          </div>
+          {publicSources.map((source) => (
+            <div key={source.key} className='p-3 border border-purple-200 dark:border-purple-800 rounded-lg bg-purple-50/50 dark:bg-purple-900/10'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <h5 className='text-sm font-medium text-gray-900 dark:text-gray-100'>{source.name}</h5>
+                  <span className='px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded'>公共</span>
+                </div>
+                <span className='text-xs text-gray-400 dark:text-gray-500'>只读</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 分隔线（只在两区块都有内容时显示） */}
+      {publicSources.length > 0 && deferredSources.length > 0 && !showAddForm && editingIndex === null && (
+        <div className='border-t border-gray-200 dark:border-gray-700' />
+      )}
+
+      {/* 私人源列表 */}
       {deferredSources.length > 0 && !showAddForm && editingIndex === null && (
         <div className='space-y-3'>
+          {publicSources.length > 0 && (
+            <div className='text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide'>私人源</div>
+          )}
           {deferredSources.map((source, index) => (
             <div key={source.key} className='p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50'>
               <div className='flex items-start justify-between'>
@@ -315,16 +346,6 @@ export const UserEmbyConfig = memo(({ initialConfig }: UserEmbyConfigProps) => {
               className='px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors'>
               取消
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Toast */}
-      {showToast && (
-        <div className='fixed top-20 left-1/2 -translate-x-1/2 z-[1100]'>
-          <div className={`px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastType === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
-            {toastType === 'success' ? <Check className='w-5 h-5' /> : <X className='w-5 h-5' />}
-            <span className='font-medium'>{toastMessage}</span>
           </div>
         </div>
       )}
