@@ -56,3 +56,6 @@ crash-reports.jsonl
 
 # sqlite data
 data/
+
+# edgeone build output
+.edgeone/

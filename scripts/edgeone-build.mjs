@@ -159,6 +159,20 @@ function patchEdgeFunctionEnvInjection() {
     );
   }
 
+  // 在 edge function 层注入 x-pathname / x-search 请求头
+  // layout.tsx 的 SSR 认证守卫靠这两个头判断当前路径；EdgeOne 的 opennext
+  // 适配层不会自动提供，且部分页面请求会绕过 middleware，所以必须在最外层注入
+  const pathMarker = '/* edgeone-pathname-injected */';
+  const urlTarget = 'let urlInfo = new URL(request.url);';
+  if (!code.includes(pathMarker) && !code.includes(urlTarget)) {
+    console.warn('[edgeone-build] Unable to patch edge function pathname injection: target not found');
+  } else if (!code.includes(pathMarker)) {
+    code = code.replace(
+      urlTarget,
+      `${urlTarget}\n          ${pathMarker}\n          try {\n            if (!request.headers.get('x-pathname')) {\n              request.headers.set('x-pathname', urlInfo.pathname);\n            }\n            if (!request.headers.get('x-search')) {\n              request.headers.set('x-search', urlInfo.search);\n            }\n          } catch (e) {}`
+    );
+  }
+
   // 兼容 Next.js 16 proxy.ts（executeMiddleware，构建时已临时转换）
   const middlewareSignature = 'async function executeMiddleware({request}) {';
   const middlewareMarker = '/* edgeone-middleware-env-injected */';
@@ -199,12 +213,19 @@ function convertProxyToMiddlewareForBuild() {
 
   // 在 middleware 函数体开头注入跳过路径检查
   // 替代原 matcher 负向前瞻排除的路径，避免 /login 被无限重定向
+  // 同时把真实 pathname/search 注入请求头：layout 的 SSR 认证守卫依赖
+  // x-pathname/x-search 判断当前路径（EdgeOne 的 opennext 适配层会通过
+  // x-middleware-override-headers / x-middleware-request-* 机制把这些头透传
+  // 给 SSR），否则守卫拿不到路径会误判 /login 等公开页为首页导致 307 循环
   const skipPathsLiteral = JSON.stringify(skipPaths);
   const skipInjection = `
   /* edgeone-middleware-skip-paths */
   const __edgeOneSkipPaths = ${skipPathsLiteral};
   if (__edgeOneSkipPaths.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
+    const __eoReqHeaders = new Headers(request.headers);
+    __eoReqHeaders.set('x-pathname', pathname);
+    __eoReqHeaders.set('x-search', request.nextUrl.search);
+    return NextResponse.next({ request: { headers: __eoReqHeaders } });
   }`;
 
   const destructureRegex = /(const\s*\{\s*pathname\s*\}\s*=\s*request\.nextUrl\s*;)/;
@@ -217,7 +238,10 @@ function convertProxyToMiddlewareForBuild() {
   const __edgeOnePathname = request.nextUrl.pathname;
   const __edgeOneSkipPaths = ${skipPathsLiteral};
   if (__edgeOneSkipPaths.some((p) => __edgeOnePathname.startsWith(p))) {
-    return NextResponse.next();
+    const __eoReqHeaders = new Headers(request.headers);
+    __eoReqHeaders.set('x-pathname', __edgeOnePathname);
+    __eoReqHeaders.set('x-search', request.nextUrl.search);
+    return NextResponse.next({ request: { headers: __eoReqHeaders } });
   }`;
     const fnRegex = /(export\s+async\s+function\s+middleware\s*\([^)]*\)\s*\{)/;
     content = content.replace(fnRegex, `$1${fallback}`);
