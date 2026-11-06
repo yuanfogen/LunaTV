@@ -128,7 +128,7 @@ jobs:
       - name: Deploy to EdgeOne
         id: deploy
         env:
-          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN || secrets.EDGEONE_TOKEN }}
           EDGEONE_PROJECT_NAME: ${{ inputs.project_name }}
           EDGEONE_AREA: ${{ inputs.area }}
         run: |
@@ -150,7 +150,7 @@ jobs:
       - name: Sync EdgeOne environment variables
         if: ${{ inputs.sync_environment }}
         env:
-          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN || secrets.EDGEONE_TOKEN }}
         run: |
           keys=(
             USERNAME PASSWORD NEXT_PUBLIC_STORAGE_TYPE
@@ -180,7 +180,7 @@ jobs:
         if: ${{ inputs.sync_environment }}
         id: redeploy
         env:
-          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN || secrets.EDGEONE_TOKEN }}
           EDGEONE_PROJECT_NAME: ${{ inputs.project_name }}
           EDGEONE_AREA: ${{ inputs.area }}
         run: |
