@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install EdgeOne CLI (build script requires edgeone binary)
+        run: npm install -g edgeone@latest
+
       - name: Export build environment variables
         env:
           USERNAME: ${{ secrets.USERNAME }}
